@@ -109,7 +109,8 @@ action:
           - condition: template
             value_template: "{{ trigger_id == 'time_pattern' }}"
         sequence:
-          - service: stenite_battery_planner.plan
+          - response_variable: plan
+            service: stenite_battery_planner.plan
             data:
               battery_soc: "{{ states(battery_soc) | float }}"
 
