@@ -1,0 +1,164 @@
+blueprint:
+  name: Smart Battery Management
+  description: Comprehensive battery management system incorporating planning, control, and self-consumption
+  domain: automation
+  source_url: https://github.com/Mewongu/hass_blueprint_ferroamp_battery_optimization
+  input:
+    # Battery System Sensors
+    battery_soc_sensor:
+      name: Battery State of Charge Sensor
+      description: Sensor measuring battery state of charge
+      selector:
+        entity:
+          domain: sensor
+    power_in_sensor:
+      name: Power Input Sensor
+      description: Sensor measuring power being drawn from the grid
+      selector:
+        entity:
+          domain: sensor
+    power_out_sensor:
+      name: Power Output Sensor
+      description: Sensor measuring power being exported to the grid
+      selector:
+        entity:
+          domain: sensor
+
+    # Battery Planner Settings
+    planner_update_interval:
+      name: Planner Update Interval
+      description: How often to update the battery plan (in minutes)
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: minutes
+
+    # Self-Consumption Settings
+    power_threshold:
+      name: Power Change Threshold
+      description: Minimum power change threshold in watts before updating
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 10
+          unit_of_measurement: W
+
+    # Helper Entities
+    last_discharge_helper:
+      name: Last Discharge Helper
+      description: Input number entity to store last discharge power
+      selector:
+        entity:
+          domain: input_number
+
+variables:
+  battery_soc: !input battery_soc_sensor
+  power_in: !input power_in_sensor
+  power_out: !input power_out_sensor
+  update_interval: !input planner_update_interval
+  power_threshold: !input power_threshold
+  last_discharge: !input last_discharge_helper
+
+trigger:
+  # Trigger 1: Regular planning update
+  - platform: time_pattern
+    minutes: /{{ update_interval }}
+
+  # Trigger 2: Monitor planner recommendations
+  - platform: state
+    entity_id:
+      - sensor.battery_planner_current_recommended_action
+      - sensor.battery_planner_current_recommended_power
+
+  # Trigger 3: Monitor power changes for self-consumption
+  - platform: state
+    entity_id: !input power_in_sensor
+    for:
+      seconds: 1
+  - platform: state
+    entity_id: !input power_out_sensor
+    for:
+      seconds: 1
+
+action:
+  - variables:
+      trigger_id: "{{ trigger.platform }}"
+      current_action: "{{ states('sensor.battery_planner_current_recommended_action') }}"
+      recommended_power: "{{ states('sensor.battery_planner_current_recommended_power') | float(0) }}"
+
+  - choose:
+      # Handle planning updates
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger_id == 'time_pattern' }}"
+        sequence:
+          - service: stenite_battery_planner.plan
+            data:
+              battery_soc: "{{ states(battery_soc) | float }}"
+
+      # Handle battery control based on planner recommendations
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ trigger_id == 'state' and 
+                 (trigger.entity_id in ['sensor.battery_planner_current_recommended_action', 
+                                      'sensor.battery_planner_current_recommended_power']) }}
+        sequence:
+          - choose:
+              # Charging action
+              - conditions:
+                  - condition: template
+                    value_template: "{{ current_action == 'charge' }}"
+                sequence:
+                  - service: ferroamp.charge
+                    data:
+                      power: "{{ recommended_power | abs }}"
+
+              # Discharging action
+              - conditions:
+                  - condition: template
+                    value_template: "{{ current_action == 'discharge' }}"
+                sequence:
+                  - service: ferroamp.discharge
+                    data:
+                      power: "{{ recommended_power }}"
+
+              # Idle action
+              - conditions:
+                  - condition: template
+                    value_template: "{{ current_action == 'idle' }}"
+                sequence:
+                  - service: ferroamp.discharge
+                    data:
+                      power: 0
+
+              # Self-consumption mode
+              - conditions:
+                  - condition: template
+                    value_template: "{{ current_action == 'self_consumption' }}"
+                sequence:
+                  - variables:
+                      power_in_value: "{{ states(power_in) | float(0) }}"
+                      power_out_value: "{{ states(power_out) | float(0) }}"
+                      last_discharge_value: "{{ states(last_discharge) | float(0) }}"
+                      current_power_flow: "{{ (power_in_value - power_out_value) * 1000 }}"
+                      true_consumption: "{{ current_power_flow + last_discharge_value }}"
+                  - service: ferroamp.discharge
+                    data:
+                      power: >
+                        {% if (true_consumption - last_discharge_value) | abs > power_threshold %}
+                          {{ true_consumption | round(0) }}
+                        {% else %}
+                          {{ last_discharge_value | round(0) }}
+                        {% endif %}
+                  - service: input_number.set_value
+                    target:
+                      entity_id: !input last_discharge_helper
+                    data:
+                      value: "{{ true_consumption }}"
+
+mode: parallel
