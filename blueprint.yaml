@@ -28,12 +28,24 @@ blueprint:
     planner_update_interval:
       name: Planner Update Interval
       description: How often to update the battery plan (in minutes)
-      default: 1
+      default: "*"
       selector:
-        number:
-          min: 1
-          max: 60
-          unit_of_measurement: minutes
+        select:
+          options:
+            - label: "Every minute"
+              value: "*"
+            - label: "Every 2 minutes"
+              value: "/2"
+            - label: "Every 5 minutes"
+              value: "/5"
+            - label: "Every 10 minutes"
+              value: "/10"
+            - label: "Every 15 minutes"
+              value: "/15"
+            - label: "Every 30 minutes"
+              value: "/30"
+            - label: "Every hour"
+              value: "0"
 
     # Self-Consumption Settings
     power_threshold:
@@ -63,10 +75,11 @@ variables:
   power_threshold: !input power_threshold
   last_discharge: !input last_discharge_helper
 
+
 trigger:
   # Trigger 1: Regular planning update
   - platform: time_pattern
-    minutes: /{{ update_interval }}
+    minutes: !input planner_update_interval
 
   # Trigger 2: Monitor planner recommendations
   - platform: state
