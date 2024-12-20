@@ -174,17 +174,17 @@ action:
           - variables:
               power_in_value: "{{ states(power_in) | float(0) }}"
               power_out_value: "{{ states(power_out) | float(0) }}"
-              last_discharge_value: "{{ states(last_discharge) | float(0) }}"
-              current_power_flow: "{{ (power_in_value - power_out_value) * 1000 }}"
+              last_discharge_value: "{{ states(last_discharge) | float(0) }}"  # 2200
+              current_power_flow: "{{ (power_in_value - power_out_value) * 1000 }}" # -400 W
               new_power: >
-                {% if (current_power_flow) | abs > power_threshold %}
+                {% if (current_power_flow) | abs > power_threshold %} 
                   {{ current_power_flow + last_discharge_value | round(0) }}
                 {% else %}
                   {{ last_discharge_value | round(0) }}
                 {% endif %}
           # Determine whether to charge or discharge based on consumption value
           - service: >
-              {% if current_power_flow < 0 %}
+              {% if new_power < 0 %}
                 ferroamp.charge
               {% else %}
                 ferroamp.discharge
