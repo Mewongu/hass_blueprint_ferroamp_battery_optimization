@@ -24,6 +24,20 @@ blueprint:
         entity:
           domain: sensor
 
+    # Battery Planner Sensors
+    planner_action_sensor:
+      name: Battery Planner Action Sensor
+      description: Sensor indicating the current recommended action from the planner
+      selector:
+        entity:
+          domain: sensor
+    planner_power_sensor:
+      name: Battery Planner Power Sensor
+      description: Sensor indicating the recommended power level from the planner
+      selector:
+        entity:
+          domain: sensor
+
     # Battery Planner Settings
     planner_update_interval:
       name: Planner Update Interval
@@ -71,10 +85,11 @@ variables:
   battery_soc: !input battery_soc_sensor
   power_in: !input power_in_sensor
   power_out: !input power_out_sensor
+  planner_action: !input planner_action_sensor
+  planner_power: !input planner_power_sensor
   update_interval: !input planner_update_interval
   power_threshold: !input power_threshold
   last_discharge: !input last_discharge_helper
-
 
 trigger:
   # Trigger 1: Regular planning update
@@ -84,8 +99,8 @@ trigger:
   # Trigger 2: Monitor planner recommendations
   - platform: state
     entity_id:
-      - sensor.battery_planner_current_recommended_action
-      - sensor.battery_planner_current_recommended_power
+      - !input planner_action_sensor
+      - !input planner_power_sensor
 
   # Trigger 3: Monitor power changes for self-consumption
   - platform: state
@@ -100,8 +115,8 @@ trigger:
 action:
   - variables:
       trigger_id: "{{ trigger.platform }}"
-      current_action: "{{ states('sensor.battery_planner_current_recommended_action') }}"
-      recommended_power: "{{ states('sensor.battery_planner_current_recommended_power') | float(0) }}"
+      current_action: "{{ states(planner_action) }}"
+      recommended_power: "{{ states(planner_power) | float(0) }}"
 
   - choose:
       # Handle planning updates
@@ -119,8 +134,7 @@ action:
           - condition: template
             value_template: >
               {{ trigger_id == 'state' and 
-                 (trigger.entity_id in ['sensor.battery_planner_current_recommended_action', 
-                                      'sensor.battery_planner_current_recommended_power']) }}
+                 (trigger.entity_id in [planner_action, planner_power]) }}
         sequence:
           - choose:
               # Charging action
