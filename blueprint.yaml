@@ -161,14 +161,31 @@ action:
                       last_discharge_value: "{{ states(last_discharge) | float(0) }}"
                       current_power_flow: "{{ (power_in_value - power_out_value) * 1000 }}"
                       true_consumption: "{{ current_power_flow + last_discharge_value }}"
-                  - service: ferroamp.discharge
-                    data:
-                      power: >
-                        {% if (true_consumption - last_discharge_value) | abs > power_threshold %}
-                          {{ true_consumption | round(0) }}
-                        {% else %}
-                          {{ last_discharge_value | round(0) }}
-                        {% endif %}
+                  - choose:
+                      # If true_consumption is negative, we are exporting
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ true_consumption < 0 }}"
+                        sequence:
+                          - service: ferroamp.charge
+                            data:
+                              power: >
+                                {% if (true_consumption - last_discharge_value) | abs > power_threshold %}
+                                  {{ (-true_consumption) | round(0) }}
+                                {% else %}
+                                  {{ last_discharge_value | round(0) }}
+                                {% endif %}
+                      # Normal self-consumption behavior
+                      - conditions: []
+                        sequence:
+                          - service: ferroamp.discharge
+                            data:
+                              power: >
+                                {% if (true_consumption - last_discharge_value) | abs > power_threshold %}
+                                  {{ true_consumption | round(0) }}
+                                {% else %}
+                                  {{ last_discharge_value | round(0) }}
+                                {% endif %}
                   - service: input_number.set_value
                     target:
                       entity_id: !input last_discharge_helper
